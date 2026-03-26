@@ -3,6 +3,9 @@ import { kv } from "@/lib/kv";
 import { fetchDrugPrices, matchKnownDrug } from "@/lib/pharmeasy";
 
 export const revalidate = 0;
+const isKvConfigured = Boolean(
+  process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+);
 
 export const GET = async (request: Request) => {
   const { searchParams } = new URL(request.url);
@@ -24,13 +27,16 @@ export const GET = async (request: Request) => {
 
     const enriched = results.map((item) => {
       const match = matchKnownDrug(item.brand_name) ?? matchKnownDrug(query);
-      return match ? { ...item, type: match.type } : item;
+      if (match) return { ...item, type: match.type };
+      return { ...item, type: "User Added" as const };
     });
 
-    try {
-      await kv.zincrby("search_counts", 1, normalizedQuery);
-    } catch (kvError) {
-      console.error("KV update failed", kvError);
+    if (isKvConfigured) {
+      try {
+        await kv.zincrby("search_counts", 1, normalizedQuery);
+      } catch (kvError) {
+        console.error("KV update failed", kvError);
+      }
     }
 
     if (!enriched.length) {

@@ -4,6 +4,9 @@ import { KNOWN_DRUGS } from "@/lib/drugs";
 import { TrendingItem } from "@/types";
 
 export const revalidate = 60;
+const isKvConfigured = Boolean(
+  process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+);
 
 const fallbackTrending = (): TrendingItem[] => {
   return [...KNOWN_DRUGS]
@@ -13,6 +16,10 @@ const fallbackTrending = (): TrendingItem[] => {
 };
 
 export const GET = async () => {
+  if (!isKvConfigured) {
+    return NextResponse.json({ trending: fallbackTrending() });
+  }
+
   try {
     const entries = (await kv.zrange("search_counts", 0, 4, {
       rev: true,

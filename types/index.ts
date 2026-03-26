@@ -8,13 +8,13 @@ export interface DrugResult {
   in_stock: boolean;
   source_url: string;
   image_url: string | null;
-  type?: "Indian Generic" | "Branded Import";
+  type?: "Indian Generic" | "Branded Import" | "User Added";
 }
 
 export interface KnownDrug {
   name: string;
   mfr: string;
-  type: "Indian Generic" | "Branded Import";
+  type: "Indian Generic" | "Branded Import" | "User Added";
 }
 
 export interface TrendingItem {

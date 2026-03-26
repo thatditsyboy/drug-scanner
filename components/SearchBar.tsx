@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
-import { KNOWN_DRUGS } from "@/lib/drugs";
 import { KnownDrug } from "@/types";
 
 interface SearchBarProps {
   value: string;
+  drugs: KnownDrug[];
   onChange: (value: string) => void;
   onSearch: (value: string) => void;
+  onAddDrug: (value: string) => Promise<void>;
   loading?: boolean;
 }
 
@@ -25,10 +26,7 @@ const SearchIcon = () => (
 );
 
 const Spinner = () => (
-  <svg
-    viewBox="0 0 24 24"
-    className="h-5 w-5 animate-spin text-zinc-400"
-  >
+  <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-zinc-400">
     <circle
       cx="12"
       cy="12"
@@ -38,16 +36,18 @@ const Spinner = () => (
       fill="none"
       opacity="0.25"
     />
-    <path
-      d="M21 12a9 9 0 0 1-9 9"
-      stroke="currentColor"
-      strokeWidth="2"
-      fill="none"
-    />
+    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" strokeWidth="2" fill="none" />
   </svg>
 );
 
-export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps) => {
+export const SearchBar = ({
+  value,
+  drugs,
+  onChange,
+  onSearch,
+  onAddDrug,
+  loading
+}: SearchBarProps) => {
   const [debounced, setDebounced] = useState(value);
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
@@ -55,11 +55,11 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
 
   const fuse = useMemo(
     () =>
-      new Fuse(KNOWN_DRUGS, {
+      new Fuse(drugs, {
         keys: ["name", "mfr"],
         threshold: 0.4
       }),
-    []
+    [drugs]
   );
 
   useEffect(() => {
@@ -72,9 +72,15 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
     return fuse.search(debounced).map((result) => result.item);
   }, [debounced, fuse]);
 
+  const canAddCurrentValue = useMemo(() => {
+    const normalized = debounced.trim().toLowerCase();
+    if (normalized.length < 2) return false;
+    return !drugs.some((drug) => drug.name.toLowerCase() === normalized);
+  }, [debounced, drugs]);
+
   useEffect(() => {
-    setIsOpen(suggestions.length > 0 && debounced.trim().length > 0);
-  }, [suggestions, debounced]);
+    setIsOpen((suggestions.length > 0 || canAddCurrentValue) && debounced.trim().length > 0);
+  }, [suggestions, debounced, canAddCurrentValue]);
 
   const handleSubmit = (query: string) => {
     const trimmed = query.trim();
@@ -85,17 +91,17 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const hasSuggestions = suggestions.length > 0;
+
     if (!isOpen) {
-      if (event.key === "Enter") {
-        handleSubmit(value);
-      }
+      if (event.key === "Enter") handleSubmit(value);
       return;
     }
 
-    if (event.key === "ArrowDown") {
+    if (event.key === "ArrowDown" && hasSuggestions) {
       event.preventDefault();
       setActiveIndex((prev) => (prev + 1) % suggestions.length);
-    } else if (event.key === "ArrowUp") {
+    } else if (event.key === "ArrowUp" && hasSuggestions) {
       event.preventDefault();
       setActiveIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
     } else if (event.key === "Enter") {
@@ -132,8 +138,9 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
             }}
             className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-500 transition-all duration-150 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400"
             aria-label="Clear search"
+            type="button"
           >
-            ×
+            x
           </button>
         ) : null}
       </div>
@@ -153,18 +160,19 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
                         ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-white"
                         : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
                     }`}
+                    type="button"
                   >
                     <span className="flex flex-col">
                       <span className="text-sm font-semibold">{item.name}</span>
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {item.mfr}
-                      </span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{item.mfr}</span>
                     </span>
                     <span
                       className={`rounded-full px-2 py-1 text-xs font-medium ${
                         item.type === "Indian Generic"
                           ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                          : "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+                          : item.type === "User Added"
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                            : "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"
                       }`}
                     >
                       {item.type}
@@ -173,6 +181,21 @@ export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps
                 </li>
               );
             })}
+
+            {canAddCurrentValue && (
+              <li>
+                <button
+                  onClick={() => onAddDrug(debounced.trim())}
+                  className="flex w-full items-center justify-between border-t border-zinc-200 px-4 py-3 text-left text-zinc-700 transition-all duration-150 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  type="button"
+                >
+                  <span className="text-sm font-medium">Add "{debounced.trim()}" to suggestions</span>
+                  <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                    User Added
+                  </span>
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       )}

@@ -28,12 +28,12 @@ const MoonIcon = () => (
 );
 
 export const ThemeToggle = () => {
-  const { theme, setTheme, systemTheme } = useTheme();
+  const { theme, systemTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
-  const resolvedTheme = theme === "system" ? systemTheme : theme;
+  const currentTheme = theme === "system" ? systemTheme ?? "light" : theme;
 
   if (!mounted) {
     return (
@@ -46,11 +46,12 @@ export const ThemeToggle = () => {
 
   return (
     <button
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      onClick={() => setTheme(currentTheme === "dark" ? "light" : "dark")}
       className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 transition-all duration-150 hover:shadow-soft dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
       aria-label="Toggle theme"
+      type="button"
     >
-      {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
+      {currentTheme === "dark" ? <SunIcon /> : <MoonIcon />}
     </button>
   );
 };
