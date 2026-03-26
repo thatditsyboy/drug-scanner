@@ -43,6 +43,38 @@ const numberFromCandidates = (...values: unknown[]): number | null => {
   return null;
 };
 
+const findNumberByKeys = (
+  value: unknown,
+  keys: string[],
+  depth = 0
+): number | null => {
+  if (depth > 4 || value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNumberByKeys(item, keys, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (typeof value !== "object") return null;
+
+  const obj = value as Record<string, unknown>;
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (keys.includes(k.toLowerCase())) {
+      const parsed = safeNumber(v);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  for (const nested of Object.values(obj)) {
+    const found = findNumberByKeys(nested, keys, depth + 1);
+    if (found !== null) return found;
+  }
+
+  return null;
+};
+
 const inferDose = (name: string, packForm?: string | null): string | null => {
   if (packForm && packForm.trim().length > 0) return packForm.trim();
   const doseMatch = name.match(doseRegex);
@@ -94,7 +126,8 @@ const mapProductDeterministically = (product: any, query: string): DrugResult =>
     product?.pricing?.listedPrice,
     product?.pricing?.basePrice,
     product?.priceDetails?.mrp,
-    product?.priceDetails?.price
+    product?.priceDetails?.price,
+    findNumberByKeys(product, ["mrp", "listedprice", "strikedprice", "originalprice"])
   );
 
   const sellingPrice = numberFromCandidates(
@@ -110,7 +143,16 @@ const mapProductDeterministically = (product: any, query: string): DrugResult =>
     product?.priceDetails?.discountedPrice,
     product?.priceDetails?.offerPrice,
     product?.priceDetails?.finalPrice,
-    product?.bestPrice
+    product?.bestPrice,
+    findNumberByKeys(product, [
+      "discountedprice",
+      "offerprice",
+      "sellingprice",
+      "saleprice",
+      "finalprice",
+      "ourprice",
+      "bestprice"
+    ])
   );
 
   const fallbackSelling = sellingPrice ?? listedPrice;
@@ -225,29 +267,36 @@ const extractRowsWithOpenAI = async (
           name: "pharmeasy_price_rows",
           strict: true,
           schema: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                brand_name: { type: "string" },
-                manufacturer: { type: "string" },
-                dose: { type: ["string", "null"] },
-                selling_price_inr: { type: ["number", "null"] },
-                listed_price_inr: { type: ["number", "null"] },
-                discount_percent: { type: ["number", "null"] },
-                in_stock: { type: "boolean" }
-              },
-              required: [
-                "brand_name",
-                "manufacturer",
-                "dose",
-                "selling_price_inr",
-                "listed_price_inr",
-                "discount_percent",
-                "in_stock"
-              ]
-            }
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              rows: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    brand_name: { type: "string" },
+                    manufacturer: { type: "string" },
+                    dose: { type: ["string", "null"] },
+                    selling_price_inr: { type: ["number", "null"] },
+                    listed_price_inr: { type: ["number", "null"] },
+                    discount_percent: { type: ["number", "null"] },
+                    in_stock: { type: "boolean" }
+                  },
+                  required: [
+                    "brand_name",
+                    "manufacturer",
+                    "dose",
+                    "selling_price_inr",
+                    "listed_price_inr",
+                    "discount_percent",
+                    "in_stock"
+                  ]
+                }
+              }
+            },
+            required: ["rows"]
           }
         }
       }
@@ -270,9 +319,10 @@ const extractRowsWithOpenAI = async (
   }
 
   const parsed = JSON.parse(outputText);
-  if (!Array.isArray(parsed)) return [];
+  const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
+  if (!Array.isArray(rows)) return [];
 
-  return parsed
+  return rows
     .map((row) => sanitizeExtractionRow(row, manufacturerHint))
     .filter((row) => row.brand_name.length > 0);
 };
