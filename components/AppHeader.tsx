@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface AppHeaderProps {
   showBack?: boolean;
@@ -31,7 +30,7 @@ export const AppHeader = ({ showBack, onBack }: AppHeaderProps) => {
           </div>
         </div>
 
-        <ThemeToggle />
+        <div />
       </div>
     </header>
   );
