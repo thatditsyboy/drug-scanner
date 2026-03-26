@@ -28,12 +28,12 @@ const MoonIcon = () => (
 );
 
 export const ThemeToggle = () => {
-  const { theme, systemTheme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
-  const currentTheme = theme === "system" ? systemTheme ?? "light" : theme;
+  const currentTheme = resolvedTheme ?? "light";
 
   if (!mounted) {
     return (

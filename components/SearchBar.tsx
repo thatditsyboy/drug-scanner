@@ -85,6 +85,7 @@ export const SearchBar = ({
   const handleSubmit = (query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
+    onChange(trimmed);
     onSearch(trimmed);
     setIsOpen(false);
     setActiveIndex(-1);
@@ -153,7 +154,10 @@ export const SearchBar = ({
               return (
                 <li key={`${item.name}-${item.mfr}`}>
                   <button
-                    onClick={() => handleSubmit(item.name)}
+                    onClick={() => {
+                      onChange(item.name);
+                      handleSubmit(item.name);
+                    }}
                     onMouseEnter={() => setActiveIndex(index)}
                     className={`flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-150 ${
                       active
@@ -185,7 +189,10 @@ export const SearchBar = ({
             {canAddCurrentValue && (
               <li>
                 <button
-                  onClick={() => onAddDrug(debounced.trim())}
+                  onClick={() => {
+                    onChange(debounced.trim());
+                    onAddDrug(debounced.trim());
+                  }}
                   className="flex w-full items-center justify-between border-t border-zinc-200 px-4 py-3 text-left text-zinc-700 transition-all duration-150 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   type="button"
                 >

@@ -52,6 +52,8 @@ const inferDose = (name: string, packForm?: string | null): string | null => {
 };
 
 const normalizeText = (value: string) => value.trim().toLowerCase();
+const normalizeCompact = (value: string) =>
+  normalizeText(value).replace(/[^a-z0-9]/g, "");
 
 const fetchPharmEasyProducts = async (query: string): Promise<any[]> => {
   const url = `https://pharmeasy.in/api/search/search/?q=${encodeURIComponent(query)}`;
@@ -312,6 +314,23 @@ const mergeAIWithProductContext = (
   });
 };
 
+const isRelevantBrandForQuery = (
+  brandName: string,
+  query: string,
+  knownName?: string
+): boolean => {
+  const brandCompact = normalizeCompact(brandName);
+  const queryCompact = normalizeCompact(query);
+  if (!brandCompact || !queryCompact) return false;
+
+  if (knownName) {
+    const knownCompact = normalizeCompact(knownName);
+    return brandCompact.includes(knownCompact);
+  }
+
+  return brandCompact.includes(queryCompact);
+};
+
 export const matchKnownDrug = (name: string): KnownDrug | undefined => {
   const normalized = name.trim();
   if (!normalized) return undefined;
@@ -334,8 +353,8 @@ export const fetchDrugPrices = async (query: string): Promise<DrugResult[]> => {
   try {
     const aiRows = await extractRowsWithOpenAI(query, products, known?.mfr ?? null);
     if (aiRows.length > 0) {
-      return mergeAIWithProductContext(query, aiRows, products).filter(
-        (item) => item.brand_name.length > 0
+      return mergeAIWithProductContext(query, aiRows, products).filter((item) =>
+        isRelevantBrandForQuery(item.brand_name, query, known?.name)
       );
     }
   } catch (error) {
@@ -344,5 +363,5 @@ export const fetchDrugPrices = async (query: string): Promise<DrugResult[]> => {
 
   return products
     .map((product) => mapProductDeterministically(product, query))
-    .filter((item) => item.brand_name.length > 0);
+    .filter((item) => isRelevantBrandForQuery(item.brand_name, query, known?.name));
 };
