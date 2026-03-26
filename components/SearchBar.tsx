@@ -51,6 +51,7 @@ export const SearchBar = ({
   const [debounced, setDebounced] = useState(value);
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [suppressDropdown, setSuppressDropdown] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const fuse = useMemo(
@@ -79,12 +80,18 @@ export const SearchBar = ({
   }, [debounced, drugs]);
 
   useEffect(() => {
+    if (suppressDropdown) {
+      setIsOpen(false);
+      return;
+    }
     setIsOpen((suggestions.length > 0 || canAddCurrentValue) && debounced.trim().length > 0);
-  }, [suggestions, debounced, canAddCurrentValue]);
+  }, [suggestions, debounced, canAddCurrentValue, suppressDropdown]);
 
   const handleSubmit = (query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
+    setSuppressDropdown(true);
+    inputRef.current?.blur();
     onChange(trimmed);
     onSearch(trimmed);
     setIsOpen(false);
@@ -122,7 +129,11 @@ export const SearchBar = ({
         <input
           ref={inputRef}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => {
+            setSuppressDropdown(false);
+            onChange(event.target.value);
+          }}
+          onFocus={() => setSuppressDropdown(false)}
           onKeyDown={handleKeyDown}
           placeholder="e.g. Ozempic, Semanext, Wegovy..."
           className="flex-1 bg-transparent text-base outline-none placeholder:text-zinc-400"
@@ -132,6 +143,7 @@ export const SearchBar = ({
         ) : value ? (
           <button
             onClick={() => {
+              setSuppressDropdown(true);
               onChange("");
               setIsOpen(false);
               setActiveIndex(-1);
