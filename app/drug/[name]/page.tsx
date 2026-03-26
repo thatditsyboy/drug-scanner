@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { ResultsGrid } from "@/components/ResultsGrid";
 import { SearchBar } from "@/components/SearchBar";
 import { SearchProgressOverlay } from "@/components/SearchProgressOverlay";
-import { KnownDrug, DrugResult, TrendingItem } from "@/types";
+import { KnownDrug, DrugResult } from "@/types";
 import { KNOWN_DRUGS } from "@/lib/drugs";
 
 const parseQueryFromParam = (value: string | string[] | undefined) => {
@@ -26,7 +26,6 @@ export default function DrugResultsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drugs, setDrugs] = useState<KnownDrug[]>(KNOWN_DRUGS);
-  const [trending, setTrending] = useState<TrendingItem[]>([]);
 
   const fetchDrugs = useCallback(async () => {
     try {
@@ -36,16 +35,6 @@ export default function DrugResultsPage() {
       setDrugs(data.drugs ?? KNOWN_DRUGS);
     } catch (err) {
       console.error("Failed to load community drugs", err);
-    }
-  }, []);
-
-  const fetchTrending = useCallback(async () => {
-    try {
-      const response = await fetch("/api/trending");
-      const data = await response.json();
-      setTrending(data.trending ?? []);
-    } catch (err) {
-      console.error("Failed to load trending", err);
     }
   }, []);
 
@@ -67,16 +56,14 @@ export default function DrugResultsPage() {
         setResults([]);
       } finally {
         setLoading(false);
-        fetchTrending();
       }
     },
-    [fetchTrending]
+    []
   );
 
   useEffect(() => {
     fetchDrugs();
-    fetchTrending();
-  }, [fetchDrugs, fetchTrending]);
+  }, [fetchDrugs]);
 
   useEffect(() => {
     if (!queryFromUrl) return;
@@ -107,8 +94,6 @@ export default function DrugResultsPage() {
     handleSearch(name);
   };
 
-  const topTrending = useMemo(() => trending.slice(0, 5), [trending]);
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       <div className="pointer-events-none absolute inset-0">
@@ -138,21 +123,6 @@ export default function DrugResultsPage() {
             />
           </div>
         </section>
-
-        {!!topTrending.length && (
-          <div className="mt-8 flex flex-wrap gap-3">
-            {topTrending.map((item) => (
-              <button
-                key={item.name}
-                onClick={() => handleSearch(item.name)}
-                className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-600 transition-all duration-150 hover:border-cyan-500 hover:text-cyan-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-                type="button"
-              >
-                {item.name}
-              </button>
-            ))}
-          </div>
-        )}
 
         <section className="mt-8">
           <ResultsGrid results={results} loading={loading} query={query} error={error} />
