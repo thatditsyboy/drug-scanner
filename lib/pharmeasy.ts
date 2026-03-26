@@ -14,6 +14,16 @@ const knownDrugFuse = new Fuse(KNOWN_DRUGS, {
   includeScore: true
 });
 
+interface OpenAIExtractionRow {
+  brand_name: string;
+  manufacturer: string;
+  dose: string | null;
+  selling_price_inr: number | null;
+  listed_price_inr: number | null;
+  discount_percent: number | null;
+  in_stock: boolean;
+}
+
 const safeNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -41,20 +51,31 @@ const inferDose = (name: string, packForm?: string | null): string | null => {
   return packMatch ? packMatch[0] : null;
 };
 
-export const matchKnownDrug = (name: string): KnownDrug | undefined => {
-  const normalized = name.trim();
-  if (!normalized) return undefined;
+const normalizeText = (value: string) => value.trim().toLowerCase();
 
-  const exact = KNOWN_DRUGS.find(
-    (drug) => drug.name.toLowerCase() === normalized.toLowerCase()
-  );
-  if (exact) return exact;
+const fetchPharmEasyProducts = async (query: string): Promise<any[]> => {
+  const url = `https://pharmeasy.in/api/search/search/?q=${encodeURIComponent(query)}`;
 
-  const result = knownDrugFuse.search(normalized)[0];
-  return result ? result.item : undefined;
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "application/json"
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`PharmEasy request failed: ${response.status}`);
+  }
+
+  const json = (await response.json()) as any;
+  const products: any[] =
+    json?.data?.products || json?.data?.data?.products || json?.data?.data || [];
+
+  return products.slice(0, 15);
 };
 
-const mapProductToDrugResult = (product: any, query: string): DrugResult => {
+const mapProductDeterministically = (product: any, query: string): DrugResult => {
   const brandName = (product?.name ?? product?.productName ?? "").toString().trim();
   const manufacturer =
     (product?.manufacturer ?? product?.marketerName ?? "").toString().trim() ||
@@ -114,27 +135,214 @@ const mapProductToDrugResult = (product: any, query: string): DrugResult => {
   };
 };
 
-export const fetchDrugPrices = async (query: string): Promise<DrugResult[]> => {
-  const url = `https://pharmeasy.in/api/search/search/?q=${encodeURIComponent(query)}`;
+const sanitizeExtractionRow = (row: any, manufacturerHint?: string | null): OpenAIExtractionRow => {
+  const listedPrice = safeNumber(row?.listed_price_inr);
+  let sellingPrice = safeNumber(row?.selling_price_inr);
+  let discountPercent = safeNumber(row?.discount_percent);
 
-  const response = await fetch(url, {
+  if (sellingPrice === null && listedPrice !== null && discountPercent !== null) {
+    sellingPrice = Number((listedPrice * (1 - discountPercent / 100)).toFixed(2));
+  }
+
+  if (
+    discountPercent === null &&
+    listedPrice !== null &&
+    sellingPrice !== null &&
+    listedPrice > 0 &&
+    sellingPrice <= listedPrice
+  ) {
+    discountPercent = Math.round((1 - sellingPrice / listedPrice) * 100);
+  }
+
+  const normalizedDose =
+    typeof row?.dose === "string" && normalizeText(row.dose) !== "not found"
+      ? row.dose.trim()
+      : null;
+
+  return {
+    brand_name:
+      typeof row?.brand_name === "string" && row.brand_name.trim().length > 0
+        ? row.brand_name.trim()
+        : "",
+    manufacturer:
+      typeof row?.manufacturer === "string" && row.manufacturer.trim().length > 0
+        ? row.manufacturer.trim()
+        : manufacturerHint ?? "Unknown manufacturer",
+    dose: normalizedDose,
+    selling_price_inr: sellingPrice,
+    listed_price_inr: listedPrice,
+    discount_percent: discountPercent,
+    in_stock: Boolean(row?.in_stock)
+  };
+};
+
+const extractRowsWithOpenAI = async (
+  query: string,
+  products: any[],
+  manufacturerHint?: string | null
+): Promise<OpenAIExtractionRow[]> => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return [];
+
+  const systemPrompt = [
+    "You are a pharmaceutical price extraction engine.",
+    `Drug query: ${query}`,
+    manufacturerHint ? `Manufacturer hint: ${manufacturerHint}` : "",
+    "You are given PharmEasy search JSON products.",
+    "Extract only products genuinely matching the intended drug query and its dose variants.",
+    "Reject unrelated products even if text looks similar.",
+    "Return strictly the requested JSON schema fields."
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const userPrompt = `PharmEasy products JSON:\n${JSON.stringify(products)}`;
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
     headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "application/json"
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
     },
-    cache: "no-store"
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: systemPrompt }]
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: userPrompt }]
+        }
+      ],
+      temperature: 0.1,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "pharmeasy_price_rows",
+          strict: true,
+          schema: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                brand_name: { type: "string" },
+                manufacturer: { type: "string" },
+                dose: { type: ["string", "null"] },
+                selling_price_inr: { type: ["number", "null"] },
+                listed_price_inr: { type: ["number", "null"] },
+                discount_percent: { type: ["number", "null"] },
+                in_stock: { type: "boolean" }
+              },
+              required: [
+                "brand_name",
+                "manufacturer",
+                "dose",
+                "selling_price_inr",
+                "listed_price_inr",
+                "discount_percent",
+                "in_stock"
+              ]
+            }
+          }
+        }
+      }
+    })
   });
 
   if (!response.ok) {
-    throw new Error(`PharmEasy request failed: ${response.status}`);
+    const body = await response.text();
+    throw new Error(`OpenAI extraction failed: ${response.status} ${body}`);
   }
 
   const json = (await response.json()) as any;
-  const products: any[] =
-    json?.data?.products || json?.data?.data?.products || json?.data?.data || [];
+  const outputText =
+    json?.output_text ??
+    json?.output?.flatMap((block: any) => block.content ?? []).find((part: any) => part.type === "output_text")
+      ?.text;
+
+  if (!outputText || typeof outputText !== "string") {
+    return [];
+  }
+
+  const parsed = JSON.parse(outputText);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((row) => sanitizeExtractionRow(row, manufacturerHint))
+    .filter((row) => row.brand_name.length > 0);
+};
+
+const mergeAIWithProductContext = (
+  query: string,
+  aiRows: OpenAIExtractionRow[],
+  products: any[]
+): DrugResult[] => {
+  const deterministicRows = products.map((product) => mapProductDeterministically(product, query));
+
+  const byBrand = new Map<string, DrugResult>();
+  for (const row of deterministicRows) {
+    byBrand.set(normalizeText(row.brand_name), row);
+  }
+
+  return aiRows.map((row) => {
+    const matched = byBrand.get(normalizeText(row.brand_name));
+    const fallbackSelling = row.selling_price_inr ?? matched?.selling_price_inr ?? null;
+    const fallbackListed = row.listed_price_inr ?? matched?.listed_price_inr ?? null;
+    const fallbackDiscount =
+      row.discount_percent ??
+      matched?.discount_percent ??
+      (fallbackListed && fallbackSelling && fallbackListed > 0 && fallbackSelling <= fallbackListed
+        ? Math.round((1 - fallbackSelling / fallbackListed) * 100)
+        : null);
+
+    return {
+      brand_name: row.brand_name,
+      manufacturer: row.manufacturer || matched?.manufacturer || "Unknown manufacturer",
+      dose: row.dose ?? matched?.dose ?? null,
+      selling_price_inr: fallbackSelling,
+      listed_price_inr: fallbackListed,
+      discount_percent: fallbackDiscount,
+      in_stock: row.in_stock,
+      source_url: `https://pharmeasy.in/search/all?name=${encodeURIComponent(query)}`,
+      image_url: matched?.image_url ?? null
+    };
+  });
+};
+
+export const matchKnownDrug = (name: string): KnownDrug | undefined => {
+  const normalized = name.trim();
+  if (!normalized) return undefined;
+
+  const exact = KNOWN_DRUGS.find(
+    (drug) => drug.name.toLowerCase() === normalized.toLowerCase()
+  );
+  if (exact) return exact;
+
+  const result = knownDrugFuse.search(normalized)[0];
+  return result ? result.item : undefined;
+};
+
+export const fetchDrugPrices = async (query: string): Promise<DrugResult[]> => {
+  const products = await fetchPharmEasyProducts(query);
+  const known = matchKnownDrug(query);
+
+  if (!products.length) return [];
+
+  try {
+    const aiRows = await extractRowsWithOpenAI(query, products, known?.mfr ?? null);
+    if (aiRows.length > 0) {
+      return mergeAIWithProductContext(query, aiRows, products).filter(
+        (item) => item.brand_name.length > 0
+      );
+    }
+  } catch (error) {
+    console.error("OpenAI extraction failed, using deterministic fallback", error);
+  }
 
   return products
-    .slice(0, 15)
-    .map((product) => mapProductToDrugResult(product, query))
+    .map((product) => mapProductDeterministically(product, query))
     .filter((item) => item.brand_name.length > 0);
 };

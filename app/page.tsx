@@ -118,6 +118,9 @@ export default function HomePage() {
             Search any GLP-1 or metabolic health drug - live prices from PharmEasy
           </p>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            AI-assisted parsing is used on PharmEasy results to improve dose and discount accuracy.
+          </p>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
             Tip: Enter the correct full medicine name for more accurate pricing and stock results.
           </p>
 
