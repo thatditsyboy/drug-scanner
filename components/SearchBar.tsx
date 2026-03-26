@@ -1,0 +1,181 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import Fuse from "fuse.js";
+import { KNOWN_DRUGS } from "@/lib/drugs";
+import { KnownDrug } from "@/types";
+
+interface SearchBarProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSearch: (value: string) => void;
+  loading?: boolean;
+}
+
+const SearchIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-zinc-400">
+    <path
+      d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const Spinner = () => (
+  <svg
+    viewBox="0 0 24 24"
+    className="h-5 w-5 animate-spin text-zinc-400"
+  >
+    <circle
+      cx="12"
+      cy="12"
+      r="9"
+      stroke="currentColor"
+      strokeWidth="2"
+      fill="none"
+      opacity="0.25"
+    />
+    <path
+      d="M21 12a9 9 0 0 1-9 9"
+      stroke="currentColor"
+      strokeWidth="2"
+      fill="none"
+    />
+  </svg>
+);
+
+export const SearchBar = ({ value, onChange, onSearch, loading }: SearchBarProps) => {
+  const [debounced, setDebounced] = useState(value);
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const fuse = useMemo(
+    () =>
+      new Fuse(KNOWN_DRUGS, {
+        keys: ["name", "mfr"],
+        threshold: 0.4
+      }),
+    []
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), 300);
+    return () => clearTimeout(timer);
+  }, [value]);
+
+  const suggestions = useMemo(() => {
+    if (!debounced.trim()) return [] as KnownDrug[];
+    return fuse.search(debounced).map((result) => result.item);
+  }, [debounced, fuse]);
+
+  useEffect(() => {
+    setIsOpen(suggestions.length > 0 && debounced.trim().length > 0);
+  }, [suggestions, debounced]);
+
+  const handleSubmit = (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    onSearch(trimmed);
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isOpen) {
+      if (event.key === "Enter") {
+        handleSubmit(value);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((prev) => (prev + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const selected = suggestions[activeIndex];
+      handleSubmit(selected ? selected.name : value);
+    } else if (event.key === "Escape") {
+      setIsOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+
+  return (
+    <div className="relative w-full">
+      <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-3 shadow-soft transition-all duration-150 focus-within:border-indigo-600 focus-within:shadow-lift dark:border-zinc-800 dark:bg-zinc-900">
+        <SearchIcon />
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="e.g. Ozempic, Semanext, Wegovy..."
+          className="flex-1 bg-transparent text-base outline-none placeholder:text-zinc-400"
+        />
+        {loading ? (
+          <Spinner />
+        ) : value ? (
+          <button
+            onClick={() => {
+              onChange("");
+              setIsOpen(false);
+              setActiveIndex(-1);
+              inputRef.current?.focus();
+            }}
+            className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-500 transition-all duration-150 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400"
+            aria-label="Clear search"
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 z-20 mt-3 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
+          <ul className="max-h-72 overflow-y-auto py-2">
+            {suggestions.map((item, index) => {
+              const active = index === activeIndex;
+              return (
+                <li key={`${item.name}-${item.mfr}`}>
+                  <button
+                    onClick={() => handleSubmit(item.name)}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    className={`flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-150 ${
+                      active
+                        ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-white"
+                        : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    <span className="flex flex-col">
+                      <span className="text-sm font-semibold">{item.name}</span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {item.mfr}
+                      </span>
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-medium ${
+                        item.type === "Indian Generic"
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+                      }`}
+                    >
+                      {item.type}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
